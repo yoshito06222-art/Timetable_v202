@@ -30,7 +30,7 @@ html{height:100%}
 body{background:var(--bg);color:var(--txt);font-family:-apple-system,'Helvetica Neue',sans-serif;
   display:flex;flex-direction:column;height:100%;overflow:hidden;
   padding-top:env(safe-area-inset-top);padding-left:env(safe-area-inset-left);
-  padding-right:env(safe-area-inset-right);padding-bottom:env(safe-area-inset-bottom)}
+  padding-right:env(safe-area-inset-right)}
 .hdr{background:var(--sur);border-bottom:1px solid var(--brd);padding:13px 16px;
   display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .hdr-title{font-size:17px;font-weight:700;color:var(--acc)}
@@ -57,7 +57,7 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,'Helvetica 
 .dtgl{font-size:11px;padding:3px 10px;border-radius:20px;border:1px solid var(--brd);cursor:pointer}
 .dtgl.on{background:var(--acc);color:#fff}
 .dtgl.off{background:var(--sur2);color:var(--mut)}
-.cal-outer{flex:1;overflow:hidden;padding:4px 8px 2px}
+.cal-outer{flex:1;overflow:hidden;padding:4px 8px max(8px,env(safe-area-inset-bottom))}
 .cal{display:grid;gap:3px;height:100%}
 .cal-hd{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3px 0}
 .cal-hd-day{font-size:10px;font-weight:700;color:var(--mut);line-height:1.3}
@@ -193,13 +193,13 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,'Helvetica 
 </div>
 
 <div id="vcal" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
-  <div id="banners" class="banners" style="display:none"></div>
-  <div class="wnav">
-    <button class="wnav-btn" id="btn-prev">‹</button>
-    <span class="wnav-lbl" id="wlbl"></span>
-    <button class="wnav-btn" id="btn-next">›</button>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px 2px;flex-shrink:0">
+    <div id="banners" class="banners" style="display:inline-flex;padding:0;flex-wrap:wrap;gap:4px"></div>
+    <div class="day-toggles" id="day-toggles" style="margin-left:auto"></div>
   </div>
-  <div class="day-toggles" id="day-toggles"></div>
+  <div style="text-align:center;padding:2px 10px 4px;flex-shrink:0">
+    <span class="wnav-lbl" id="wlbl"></span>
+  </div>
   <div class="cal-outer" id="cal-outer">
     <div class="cal" id="cal-grid"></div>
   </div>
@@ -252,7 +252,7 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,'Helvetica 
   <div class="modal">
     <div class="drag"></div>
     <h2 id="mclass-title">時間割を追加</h2>
-    <div class="fg"><label>クォーター</label><select id="fc-quarter"></select></div>
+    <div class="fg"><label>クォーター（複数選択可）</label><div id="fc-quarters" style="display:flex;flex-direction:column;gap:6px;margin-top:4px"></div></div>
     <div class="fg"><label>時間割名 *</label><input id="fc-name" type="text" placeholder="例: 線形代数学"></div>
     <div class="fg"><label>時間割番号</label><input id="fc-code" type="text" placeholder="例: MA201"></div>
     <div class="fg"><label>単発授業</label>
@@ -622,7 +622,7 @@ function renderCal(){
   });
   const bd=document.getElementById('banners');
   if(bmap.size){
-    bd.style.display='flex';
+    bd.style.display='inline-flex';
     bd.innerHTML=Array.from(bmap.values()).map(function(b){return '<span class="chip '+b.cls+'">'+b.label+'</span>';}).join('');
   } else bd.style.display='none';
 
@@ -669,10 +669,15 @@ function renderCal(){
       else{
         cls=D.classes.find(function(c){
           if(c.isSingle) return c.singleDate===ds&&c.day===di&&c.period===p;
-          return c.day===di&&c.period===p&&(!c.quarterId||aqIds.includes(c.quarterId));
+          const cIds=c.quarterIds||(c.quarterId?[c.quarterId]:[]);
+          // クォーター未設定、またはアクティブなクォーターに1つでも含まれれば表示
+          return c.day===di&&c.period===p&&(cIds.length===0||cIds.some(function(id){return aqIds.includes(id);}));
         });
       }
-      if(mv) cls=D.classes.find(function(c){return c.day===mv.origDay&&c.period===mv.origPeriod&&(!c.quarterId||aqIds.includes(c.quarterId));});
+      if(mv) cls=D.classes.find(function(c){
+        const cIds=c.quarterIds||(c.quarterId?[c.quarterId]:[]);
+        return c.day===mv.origDay&&c.period===mv.origPeriod&&(cIds.length===0||cIds.some(function(id){return aqIds.includes(id);}));
+      });
       const evs=eventsFor(ds);
       const memo=D.memos.find(function(m){return m.week===wk&&m.day===di&&m.period===p;});
       if(chg&&chg.type==='cancel'){
@@ -792,13 +797,27 @@ function openMemoForm(d,p,wk){
 
 // ═══════════ CLASS FORM ═══════════
 let _clsId=null,_selColor=0;
-function buildQSelect(selId){
-  const s=document.getElementById('fc-quarter');
-  s.innerHTML='<option value="">（クォーターなし）</option>';
+function buildQSelect(selIds){
+  // selIds: string[] of selected quarter IDs
+  const wrap=document.getElementById('fc-quarters');
+  wrap.innerHTML='';
+  if(!D.quarters.length){
+    wrap.innerHTML='<span style="font-size:12px;color:var(--mut)">クォーター未設定</span>';
+    return;
+  }
   D.quarters.slice().sort(function(a,b){return a.start.localeCompare(b.start);}).forEach(function(q){
-    const o=document.createElement('option'); o.value=q.id; o.textContent=q.name;
-    if(selId&&q.id===selId) o.selected=true; s.appendChild(o);
+    const label=document.createElement('label');
+    label.style.cssText='display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer';
+    const cb=document.createElement('input');
+    cb.type='checkbox'; cb.value=q.id; cb.name='fc-quarter';
+    if(selIds&&selIds.includes(q.id)) cb.checked=true;
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(q.name+' ('+dfmt(q.start)+'〜'+dfmt(q.end)+')'));
+    wrap.appendChild(label);
   });
+}
+function getSelectedQIds(){
+  return Array.from(document.querySelectorAll('input[name="fc-quarter"]:checked')).map(function(cb){return cb.value;});
 }
 function buildColorPicker(sel){
   document.getElementById('color-row').innerHTML=CCOLORS.map(function(c,i){
@@ -823,7 +842,7 @@ function openClassForm(day,period,ds){
   document.getElementById('fc-sdate').value=ds||'';
   toggleSingle();
   const aqIds=ds?qIdsFor(ds):[];
-  buildQSelect(aqIds.length?aqIds[0]:null);
+  buildQSelect(aqIds);
   buildColorPicker(0);
   document.getElementById('fc-delete').style.display='none';
   showModal('m-class');
@@ -844,7 +863,7 @@ function openEditClass(id){
   document.getElementById('fc-single').value=c.isSingle?'1':'0';
   document.getElementById('fc-sdate').value=c.singleDate||'';
   toggleSingle();
-  buildQSelect(c.quarterId||null);
+  buildQSelect(c.quarterIds||( c.quarterId?[c.quarterId]:[] ));
   buildColorPicker(_selColor);
   document.getElementById('fc-delete').style.display='block';
   showModal('m-class');
@@ -868,7 +887,13 @@ function openDetail(id){
       +(linkedCnt>1?'<span style="font-size:11px;color:var(--mut);margin-left:6px">課題を'+linkedCnt+'コマで共有</span>':'');
     body.appendChild(bd);
   }
-  if(q){const bd=document.createElement('div');bd.style.marginBottom='10px';bd.innerHTML='<span class="sbadge bs">'+q.name+'</span>';body.appendChild(bd);}
+  const qIds=cls.quarterIds||(cls.quarterId?[cls.quarterId]:[]);
+  const qs=qIds.map(function(id){return D.quarters.find(function(x){return x.id===id;});}).filter(Boolean);
+  if(qs.length){
+    const bd=document.createElement('div'); bd.style.marginBottom='10px';
+    bd.innerHTML=qs.map(function(q){return '<span class="sbadge bs">'+q.name+'</span>';}).join(' ');
+    body.appendChild(bd);
+  }
   if(cls.isSingle){const bd=document.createElement('div');bd.style.marginBottom='10px';bd.innerHTML='<span class="sbadge be">単発 '+dfmt(cls.singleDate)+'</span>';body.appendChild(bd);}
   if(ec){
     const wb=document.createElement('div'); wb.className='warnbox';
@@ -1082,10 +1107,6 @@ document.addEventListener('DOMContentLoaded',function(){
   document.getElementById('tab-assign').addEventListener('click',function(){switchTab('assign');});
   document.getElementById('tab-settings').addEventListener('click',function(){switchTab('settings');});
 
-  // 週ナビ
-  document.getElementById('btn-prev').addEventListener('click',function(){weekOffset--;renderCal();});
-  document.getElementById('btn-next').addEventListener('click',function(){weekOffset++;renderCal();});
-
   // スワイプ
   let tx=0,ty=0;
   document.getElementById('vcal').addEventListener('touchstart',function(e){tx=e.touches[0].clientX;ty=e.touches[0].clientY;},{passive:true});
@@ -1115,13 +1136,21 @@ document.addEventListener('DOMContentLoaded',function(){
     if(isSingle&&!singleDate){alert('実施日を入力してください');return;}
     const day=+document.getElementById('fc-day').value;
     const period=+document.getElementById('fc-period').value;
-    const qId=document.getElementById('fc-quarter').value||null;
+    const qIds=getSelectedQIds(); // 複数クォーターID配列
     if(!isSingle){
-      const conflict=D.classes.find(function(c){return !c.isSingle&&c.day===day&&c.period===period&&c.id!==_clsId&&(c.quarterId||null)===qId;});
+      const conflict=D.classes.find(function(c){
+        if(c.isSingle||c.id===_clsId) return false;
+        if(c.day!==day||c.period!==period) return false;
+        // クォーターが重複するか確認
+        const cIds=c.quarterIds||(c.quarterId?[c.quarterId]:[]);
+        if(qIds.length===0&&cIds.length===0) return true;
+        return qIds.some(function(id){return cIds.includes(id);});
+      });
       if(conflict){alert(DAYS_ALL[day]+'曜 '+(period+1)+'限には「'+conflict.name+'」が既にあります');return;}
     }
     const data={name:name,code:document.getElementById('fc-code').value.trim(),day:day,period:period,
-      isSingle:isSingle,singleDate:isSingle?singleDate:null,quarterId:qId,
+      isSingle:isSingle,singleDate:isSingle?singleDate:null,
+      quarterIds:qIds,quarterId:qIds.length?qIds[0]:null, // 後方互換のためquarterIdも保持
       room:document.getElementById('fc-room').value,teacher:document.getElementById('fc-teacher').value,
       email:document.getElementById('fc-email').value,office:document.getElementById('fc-office').value,
       note:document.getElementById('fc-note').value,colorIdx:_selColor};
