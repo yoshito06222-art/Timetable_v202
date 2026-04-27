@@ -1283,10 +1283,24 @@ document.addEventListener('DOMContentLoaded',function(){
 
   window.addEventListener('resize',renderCal);
 
+  // ResizeObserverでcal-outerのサイズ確定後に確実に描画
+  const calOuter = document.getElementById('cal-outer');
+  if(window.ResizeObserver){
+    let roTimer;
+    const ro = new ResizeObserver(function(){
+      clearTimeout(roTimer);
+      roTimer = setTimeout(renderCal, 50);
+    });
+    ro.observe(calOuter);
+  }
+
   dbLoad();
   applyTheme(D.theme||'minimal');
   renderGlobalToggles();
-  renderCal();
+  // レイアウト確定後に描画
+  requestAnimationFrame(function(){
+    requestAnimationFrame(renderCal);
+  });
 });
 </script>
 </body>
